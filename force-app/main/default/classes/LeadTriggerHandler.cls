@@ -31,18 +31,26 @@ public with sharing class LeadTriggerHandler {
 	 *   change the title to 'Assistant'.
 	 */
 	public static void handleTitleNormalization(List<Lead> leadsToNormalize) {
-		for (Lead ld : leadsToNormalize) {
-			if (ld.title == 'vp' || ld.title.contains('v.p.') || ld.title.contains('vice president')) {
+		List<Lead> leadsWithTitles = new List<Lead>();
+		for (lead lead: leadsToNormalize) {
+			if(lead.Title != null) {
+				leadsWithTitles.add(lead);
+			}
+		}
+
+
+		for (Lead ld : leadsWithTitles) {
+			if (ld.Title.contains ('vp') || ld.Title.contains('v.p.') || ld.Title.contains('vice president')) {
 				ld.Title = 'Vice President';
 			} else if (
-				ld.title.contains('mgr') ||
-				ld.title.contains('manage') ||
-				ld.title.contains('head of department')
+				ld.Title.contains('mgr') ||
+				ld.Title.contains('manage') ||
+				ld.Title.contains('head of department')
 			) {
 				ld.Title = 'Manager';
-			} else if (ld.title.contains('exec') || ld.title == 'chief' || ld.title.contains('head')) {
+			} else if (ld.Title.contains('exec') || ld.Title.contains('chief') || ld.Title.contains('head')) {
 				ld.Title = 'Executive';
-			} else if (ld.title.contains('assist') || ld.title.contains('deputy') || ld.title == 'jr') {
+			} else if (ld.Title.contains('assist') || ld.Title.contains('deputy') || ld.Title.contains('jr')) {
 				ld.Title = 'Assistant';
 			}
 		}
@@ -61,19 +69,19 @@ public with sharing class LeadTriggerHandler {
 	 */
 	public static void handleAutoLeadScoring(List<Lead> leadsToScore) {
 		for (Lead ld : leadsToScore) {
-			Integer score = 10;
+			Integer score = 0;
 
 			// Check and add points based on the specified conditions
-			if (ld.LeadSource == 'Website' && ld.Email != null) {
-				score = 3;
+			if (ld.LeadSource == 'Web' && ld.Email != null) {
+				score += 3;
 			}
 
 			if (ld.Phone != null) {
-				score = 5;
+				score += 5;
 			}
 
 			if (ld.Industry == 'Technology') {
-				score = 10;
+				score += 10;
 			}
 
 			ld.Lead_Score__c = score; // Set the computed score back to the lead
@@ -103,23 +111,38 @@ public with sharing class LeadTriggerHandler {
 	 * - One of the errors is recursion related. Check if the lead is already converted or check if the email has changed/is null
 	 * - One of the errors is map related. Make sure you are using the correct contact map key
 	 */
-	public static void handleLeadAutoConvert(List<Lead> leads) {
+	public static void handleLeadAutoConvert(List<Lead> leads, Map<Id,Lead> leadsOldMap) {
 		// Step 1: Gather all lead emails
         Map<Id,String> leadToEmailMap = new Map<Id,String>();
 		for (Lead lead : leads) {
+			Boolean isNewLead = leadsOldMap == null || !leadsOldMap.containsKey(lead.Id);
+			Boolean hasEmailChanged = !isNewLead && lead.Email != leadsOldMap.get(lead.Id).Email;
+			if ((isNewLead && lead.IsConverted == false && lead.email !=null) || 
+			(!isNewLead && lead.IsConverted == false && hasEmailChanged)) {
 			leadToEmailMap.put(lead.Id, lead.Email);
+			}
+			
+		}
+		Map <String, Integer> emailCount = new Map <String, Integer> ();
+		for (contact c : [SELECT Id, Email, AccountId FROM Contact WHERE Email IN : leadToEmailMap.values()]) {
+			if (!emailCount.containsKey(c.Email)) {
+				emailCount.put(c.Email, 1);
+			} 
+			else {
+			emailCount.put(c.Email, emailCount.get(c.Email)+1);
+			}
+		}
+		List<String> singleEmails = new List<String>();
+		for (string s : emailCount.keySet()) {
+			if (emailCount.get(s)==1) {
+				singleEmails.add(s);
+			}
 		}
 
-		// Step 2: Find matching contacts based on email
 		Map<String, Contact> emailToContactMap = new Map<String, Contact>();
-		for (Contact c : [SELECT Id, Email, AccountId FROM Contact WHERE Email IN :leadToEmailMap.values()]) {
-			if (!emailToContactMap.containsKey(c.Email)) {
-				emailToContactMap.put(c.Email, c);
-			} else {
-				// If we found another contact with the same email, we don't auto-convert.
-				// So we remove the email from the map.
-				emailToContactMap.remove(c.Email);
-			}
+		for (Contact c : [SELECT Id, Email, AccountId FROM Contact WHERE Email IN :singleEmails]) {
+			emailToContactMap.put(c.Email, c);
+			
 		}
 
 		// Step 3: Auto-convert leads
